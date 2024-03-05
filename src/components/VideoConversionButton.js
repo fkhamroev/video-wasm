@@ -1,0 +1,242 @@
+import { Button } from "antd";
+import { fetchFile } from "@ffmpeg/ffmpeg";
+import { sliderValueToVideoTime } from "../utils/utils";
+import { useRef, useState } from "react";
+import { fabric } from "fabric";
+
+function VideoConversionButton({
+  videoPlayerState,
+  sliderValues,
+  videoFile,
+  overlayImage,
+  ffmpeg,
+  onConversionStart = () => {},
+  onConversionEnd = () => {},
+  onGifCreated = () => {},
+  onAudioCreated = () => {},
+}) {
+  const [overlayedVideoUrl, setOverlayedVideoUrl] = useState(null);
+  const canvasRef = useRef(null);
+
+  const convertToGif = async () => {
+    // starting the conversion process
+    onConversionStart(true);
+
+    const inputFileName = "input.mp4";
+    const outputFileName = "output.mp4";
+
+    // writing the video file to memory
+    ffmpeg.FS("writeFile", inputFileName, await fetchFile(videoFile));
+
+    const [min, max] = sliderValues;
+    const minTime = sliderValueToVideoTime(videoPlayerState.duration, min);
+    const maxTime = sliderValueToVideoTime(videoPlayerState.duration, max);
+
+    // cutting the video and converting it to GIF with a FFMpeg command
+    await ffmpeg.run(
+      "-i",
+      inputFileName,
+      "-ss",
+      `${minTime}`,
+      "-to",
+      `${maxTime}`,
+      "-codec",
+      "copy",
+      outputFileName
+    );
+
+    // reading the resulting file
+    const data = ffmpeg.FS("readFile", outputFileName);
+
+    // converting the GIF file created by FFmpeg to a valid image URL
+    const gifUrl = URL.createObjectURL(
+      new Blob([data.buffer], { type: "video/mp4" })
+    );
+    onGifCreated(gifUrl);
+
+    // ending the conversion process
+    onConversionEnd(false);
+  };
+  // gif convet
+
+  const convertToAudio = async () => {
+    onConversionStart(true);
+    const inputFileName = "input.mp4";
+    const outputFileName = "output.mp3";
+
+    ffmpeg.FS("writeFile", inputFileName, await fetchFile(videoFile));
+
+    await ffmpeg.run(
+      "-i",
+      inputFileName, // Input file
+      "-vn", // Disable video recording
+      "-ac",
+      "2", // Set number of audio channels to 2 (stereo)
+      "-ar",
+      "44100", // Set audio sampling rate to 44100 Hz
+      "-ab",
+      "320", // Set audio bitrate to 320 kbps
+      "-f",
+      "mp3", // Set output format to MP3
+      outputFileName
+    );
+    const data = ffmpeg.FS("readFile", outputFileName);
+
+    // Convert the audio file created by FFmpeg to a valid audio URL
+    const audioUrl = URL.createObjectURL(
+      new Blob([data.buffer], { type: "audio/mp3" })
+    );
+
+    // Trigger the callback function with the audio URL
+    onAudioCreated(audioUrl);
+
+    // Ending the conversion process
+    onConversionEnd(false);
+
+    // Return the audio URL
+    return audioUrl;
+  };
+
+  const downloadAudio = async () => {
+    // Call convertToAudio function to generate the audio file
+    const audioUrl = await convertToAudio();
+
+    // Get the output audio file name
+    const outputFileName = "output.mp3";
+
+    // Create a temporary link element
+    const link = document.createElement("a");
+    link.href = audioUrl; // Set the href attribute to the audio URL
+    link.download = outputFileName; // Set the download attribute to the output file name
+    document.body.appendChild(link);
+
+    // Simulate a click event on the link to trigger the download
+    link.click();
+
+    // Remove the temporary link element from the document
+    document.body.removeChild(link);
+  };
+  //   audio convert and download
+
+  const imageAdding = async () => {
+    onConversionStart(true);
+    const inputFileName = "input.mp4";
+    const outputFileName = "output.mp4";
+
+    // Write the video file to memory
+    ffmpeg.FS("writeFile", inputFileName, await fetchFile(videoFile));
+
+    // Create a canvas element for overlay
+    const canvas = document.createElement("canvas");
+    canvas.width = videoPlayerState.videoWidth;
+    canvas.height = videoPlayerState.videoHeight;
+    const ctx = canvas.getContext("2d");
+
+    // Render the overlay image onto the canvas using Fabric.js
+    const fabricCanvas = new fabric.Canvas(canvas);
+    const image = new fabric.Image(
+      await fetchFile(
+        "https://img.gazeta.ru/files3/100/13813100/g-pic_32ratio_900x600-900x600-59296.jpg"
+      )
+    );
+    fabricCanvas.add(image);
+
+    // Convert canvas to image
+    const canvasImageUrl = fabricCanvas.toDataURL("image/png");
+
+    // Write the overlay image to memory
+    ffmpeg.FS(
+      "writeFile",
+      "overlay.png",
+      await fetchFile(
+        canvasImageUrl.replace(/^data:image\/(png|jpg);base64,/, ""),
+        { encoding: "base64" }
+      )
+    );
+
+    // Run FFmpeg command to add overlay
+    await ffmpeg.run(
+      "-i",
+      inputFileName,
+      "-i",
+      "overlay.png",
+      "-filter_complex",
+      "[0:v][1:v]overlay=x=0:y=0", // Adjust overlay position as needed
+      outputFileName
+    );
+
+    const data = ffmpeg.FS("readFile", outputFileName);
+    const overlayedVideoUrl = URL.createObjectURL(
+      new Blob([data.buffer], { type: "video/mp4" })
+    );
+
+    setOverlayedVideoUrl(overlayedVideoUrl);
+    onConversionEnd(false);
+  };
+
+  const downloadOverlayedVideo = async () => {
+    if (overlayedVideoUrl) {
+      const outputFileName = "overlayed_video.mp4";
+      const link = document.createElement("a");
+      link.href = overlayedVideoUrl;
+      link.download = outputFileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  // const addTextOverlay = async () => {
+  //   onConversionStart(true);
+
+  //   const inputFileName = "input.mp4";
+  //   const outputFileName = "output.mp4";
+  //   const logoFileName = { overlay };
+
+  //   // Write the video file to memory
+  //   ffmpeg.FS("writeFile", inputFileName, await fetchFile(videoFile));
+
+  //   // Write the overlay image to memory
+  //   ffmpeg.FS("writeFile", logoFileName, await fetchFile(overlayImage));
+
+  //   // Run FFmpeg command to add overlay
+  //   await ffmpeg.run(
+  //     "-i",
+  //     inputFileName, // Input video
+  //     "-i",
+  //     logoFileName, // Overlay image
+  //     "-filter_complex",
+  //     `[0:v][1:v]overlay=10:10`, // Overlay image at position (10,10)
+  //     "[out]",
+  //     "-c:a copy",
+  //     outputFileName
+  //   );
+
+  //   // Read the resulting file
+  //   const data = ffmpeg.FS("readFile", outputFileName);
+
+  //   // Convert the processed video file created by FFmpeg to a valid video URL
+  //   const processedVideoUrl = URL.createObjectURL(
+  //     new Blob([data.buffer], { type: "video/mp4" })
+  //   );
+
+  //   // Set the URL of the processed video
+  //   setOverlayedVideoUrl(processedVideoUrl);
+
+  //   // Ending the conversion process
+  //   onConversionEnd(false);
+  // };
+
+  return (
+    <div>
+      <canvas ref={canvasRef} style={{ display: "none" }} />
+      <Button onClick={() => convertToGif()}>Trim Video</Button>
+      <Button onClick={() => downloadAudio()}>Download Audio</Button>
+      <Button onClick={() => imageAdding()}>Image adding</Button>
+      <Button onClick={() => downloadOverlayedVideo()}>Overlayed Video</Button>
+      {/* <Button onClick={() => addTextOverlay()}>Add Text Overlay</Button> */}
+    </div>
+  );
+}
+
+export default VideoConversionButton;
